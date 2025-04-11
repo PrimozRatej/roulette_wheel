@@ -3,23 +3,26 @@ import 'dart:math';
 
 import 'package:roulette_wheel/const.dart';
 
-class Roulette extends StatefulWidget {
-  const Roulette({super.key});
+class RouletteWheel extends StatefulWidget {
+  const RouletteWheel({super.key});
 
   @override
-  State<Roulette> createState() => _RouletteState();
+  State<RouletteWheel> createState() => _RouletteWheelState();
 }
 
-class _RouletteState extends State<Roulette> with SingleTickerProviderStateMixin {
+class _RouletteWheelState extends State<RouletteWheel> with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late Animation<double> _animation;
-  late Animation<double> _ballAnimation; // New animation for the ball
+  late Animation<double> _ballAnimation;
+
+  late double rouletteSize = MediaQuery.of(context).size.height * 0.8;
 
   final Random _random = Random();
   double _currentAngle = 0;
   double _targetAngle = 0;
-  double _ballPosition = 0; // Track ball position
-  double _ballOffset = 0; // Ball offset from wheel
+  double _ballPosition = 0;
+  double _ballOffset = 0;
+  bool _ballInPocket = false;
 
   @override
   void initState() {
@@ -28,7 +31,6 @@ class _RouletteState extends State<Roulette> with SingleTickerProviderStateMixin
       vsync: this,
       duration: const Duration(seconds: 4),
     );
-    // Initialize with dummy animation
     _animation = Tween<double>(begin: 0, end: 0).animate(_controller);
     _ballAnimation = Tween<double>(begin: 0, end: 0).animate(_controller);
 
@@ -40,8 +42,13 @@ class _RouletteState extends State<Roulette> with SingleTickerProviderStateMixin
     final rotations = 5 + _random.nextInt(3);
     _targetAngle = _currentAngle + (2 * pi * rotations);
 
-    // Random stopping position for the ball (different from wheel)
-    final ballStopAngle = _random.nextDouble() * 2 * pi;
+    // Get a random segment to land on
+    final selectedSegment = _random.nextInt(americanRoulette.length);
+    final segmentAngle = (2 * pi / americanRoulette.length) * selectedSegment;
+
+    setState(() {
+      _ballInPocket = false;
+    });
 
     // Create wheel animation
     _animation = Tween<double>(
@@ -54,36 +61,53 @@ class _RouletteState extends State<Roulette> with SingleTickerProviderStateMixin
       ),
     );
 
-    // Create ball animation - ball moves faster initially and slows down sooner
+    // Create ball animation - three phases:
+    // 1. Fast movement opposite to wheel
+    // 2. Slowing down
+    // 3. Landing in pocket
     _ballAnimation = TweenSequence<double>([
+      // Phase 1: Fast spinning (opposite direction, more rotations)
       TweenSequenceItem(
         tween: Tween<double>(
           begin: _ballPosition,
-          // Ball spins faster than wheel initially
-          end: _ballPosition - (2 * pi * (rotations + 2 + _random.nextInt(2))),
+          end: _ballPosition - (2 * pi * (rotations + 3)),
         ).chain(CurveTween(curve: Curves.easeOut)),
-        weight: 80,
+        weight: 60,
       ),
+      // Phase 2: Slowing down
       TweenSequenceItem(
         tween: Tween<double>(
-          begin: _ballPosition - (2 * pi * (rotations + 2 + _random.nextInt(2))),
-          end: ballStopAngle,
-        ).chain(CurveTween(curve: Curves.easeInOutSine)),
-        weight: 20,
+          begin: _ballPosition - (2 * pi * (rotations + 3)),
+          end: _ballPosition - (2 * pi * (rotations + 3.5)),
+        ).chain(CurveTween(curve: Curves.decelerate)),
+        weight: 30,
+      ),
+      // Phase 3: Final adjustment to land in pocket
+      TweenSequenceItem(
+        tween: Tween<double>(
+          begin: _ballPosition - (2 * pi * (rotations + 3.5)),
+          end: segmentAngle, // Align with a specific pocket
+        ).chain(CurveTween(curve: Curves.easeIn)),
+        weight: 10,
       ),
     ]).animate(_controller);
 
-    // Ball bouncing effect during spin
-    _ballOffset = 0.15;
+    // Ball bouncing effect during spin (higher in beginning)
+    _ballOffset = 0.5;
 
     _controller
       ..reset()
       ..forward().whenComplete(() {
         _currentAngle = _targetAngle % (2 * pi);
-        _ballPosition = ballStopAngle;
-        _ballOffset = 0; // Ball settled in pocket
-        print("Wheel stopped at: $_currentAngle, Ball at: $_ballPosition");
-        setState(() {}); // Update UI after completion
+        _ballPosition = segmentAngle;
+
+        // Ball is now in a pocket
+        setState(() {
+          _ballInPocket = true;
+          _ballOffset = 0; // No more bouncing
+        });
+
+        print("Winner: ${americanRoulette[selectedSegment]}");
       });
 
     setState(() {}); // Trigger rebuild
@@ -99,18 +123,15 @@ class _RouletteState extends State<Roulette> with SingleTickerProviderStateMixin
             return Transform.rotate(
               angle: _animation.value,
               child: CustomPaint(
-                size: const Size(400, 400),
+                size: Size(rouletteSize, rouletteSize),
                 painter: _RoulettePainter(
                   ballPosition: _ballAnimation.value,
-                  ballOffset: _ballOffset - (_controller.value * 0.1).abs().clamp(0.0, 0.1), // Create bouncing effect
+                  ballOffset: _ballOffset * (1 - _controller.value), // Reducing bounce over time
+                  ballInPocket: _ballInPocket,
                 ),
               ),
             );
           },
-        ),
-        ElevatedButton(
-          onPressed: _spin,
-          child: const Text('SPIN'),
         ),
       ],
     );
@@ -120,10 +141,12 @@ class _RouletteState extends State<Roulette> with SingleTickerProviderStateMixin
 class _RoulettePainter extends CustomPainter {
   final double ballPosition;
   final double ballOffset;
+  final bool ballInPocket;
 
   _RoulettePainter({
     this.ballPosition = 0.0,
     this.ballOffset = 0.0,
+    this.ballInPocket = false,
   });
 
   @override
@@ -131,18 +154,24 @@ class _RoulettePainter extends CustomPainter {
     final paint = Paint()..style = PaintingStyle.fill;
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width / 2;
+    final innerWoodenRadius = radius * 0.6; // Wooden center radius
+    final pocketRadius = radius * 0.77; // Where numbers end (inner circle)
+    final ballTrackRadius = radius * 0.82; // Where ball rolls
+
+    // Start with white background for the wheel
+    paint.color = Colors.white;
+    canvas.drawCircle(center, radius, paint);
 
     List<String> numbers = americanRoulette;
-
     final anglePerSegment = (2 * pi) / numbers.length;
 
-    // Draw roulette segments
+    // Draw roulette segments (pockets) - STEP 1
     for (int i = 0; i < numbers.length; i++) {
       // Segment color logic
-      if (int.parse(numbers[i]) == 0) {
+      if (numbers[i] == "0" || numbers[i] == "00") {
         paint.color = Colors.green;
       } else {
-        paint.color = i.isEven ? Colors.red : Colors.black;
+        paint.color = i % 2 == 0 ? Colors.red : Colors.black;
       }
 
       // Draw segment
@@ -153,8 +182,29 @@ class _RoulettePainter extends CustomPainter {
         true,
         paint,
       );
+    }
 
-      // Number styling
+    // Draw white pocket dividers - STEP 2
+    paint.color = Colors.white;
+    paint.style = PaintingStyle.stroke;
+    paint.strokeWidth = 1.0;
+
+    for (int i = 0; i < numbers.length; i++) {
+      final startAngle = i * anglePerSegment;
+      final lineStartX = center.dx + pocketRadius * cos(startAngle);
+      final lineStartY = center.dy + pocketRadius * sin(startAngle);
+      final lineEndX = center.dx + radius * cos(startAngle);
+      final lineEndY = center.dy + radius * sin(startAngle);
+
+      canvas.drawLine(
+        Offset(lineStartX, lineStartY),
+        Offset(lineEndX, lineEndY),
+        paint,
+      );
+    }
+
+    // Draw numbers - STEP 3
+    for (int i = 0; i < numbers.length; i++) {
       final textPainter = TextPainter(
         text: TextSpan(
           text: numbers[i],
@@ -185,20 +235,24 @@ class _RoulettePainter extends CustomPainter {
       canvas.restore();
     }
 
-    // Draw detailed inner circle
-    final innerRadius = radius * 0.6;
+    // Draw black dividing line between numbers and wooden center
+    paint.color = Colors.black;
+    paint.style = PaintingStyle.stroke;
+    paint.strokeWidth = 3.0;
+    canvas.drawCircle(center, pocketRadius, paint);
 
-    // Draw wooden background
+    // Draw detailed inner circle (wooden background)
     paint.color = const Color(0xFF8B4513); // Wooden brown color
-    canvas.drawCircle(center, innerRadius, paint);
+    paint.style = PaintingStyle.fill;
+    canvas.drawCircle(center, innerWoodenRadius, paint);
 
-    // Add wood grain texture (simple concentric circles)
+    // Add wood grain texture (concentric circles)
     paint.color = const Color(0xFF6B3613); // Darker brown
     paint.style = PaintingStyle.stroke;
     paint.strokeWidth = 0.8;
 
     for (int i = 1; i <= 10; i++) {
-      canvas.drawCircle(center, innerRadius * (0.95 - i * 0.05), paint);
+      canvas.drawCircle(center, innerWoodenRadius * (0.95 - i * 0.05), paint);
     }
 
     // Draw metallic cross structure
@@ -210,8 +264,8 @@ class _RoulettePainter extends CustomPainter {
     canvas.drawRect(
       Rect.fromCenter(
         center: center,
-        width: innerRadius * 1.4,
-        height: innerRadius * 0.15,
+        width: innerWoodenRadius * 1.4,
+        height: innerWoodenRadius * 0.15,
       ),
       paint,
     );
@@ -220,8 +274,8 @@ class _RoulettePainter extends CustomPainter {
     canvas.drawRect(
       Rect.fromCenter(
         center: center,
-        width: innerRadius * 0.15,
-        height: innerRadius * 1.4,
+        width: innerWoodenRadius * 0.15,
+        height: innerWoodenRadius * 1.4,
       ),
       paint,
     );
@@ -234,8 +288,8 @@ class _RoulettePainter extends CustomPainter {
     canvas.drawRect(
       Rect.fromCenter(
         center: center,
-        width: innerRadius * 1.4,
-        height: innerRadius * 0.15,
+        width: innerWoodenRadius * 1.4,
+        height: innerWoodenRadius * 0.15,
       ),
       paint,
     );
@@ -243,8 +297,8 @@ class _RoulettePainter extends CustomPainter {
     canvas.drawRect(
       Rect.fromCenter(
         center: center,
-        width: innerRadius * 0.15,
-        height: innerRadius * 1.4,
+        width: innerWoodenRadius * 0.15,
+        height: innerWoodenRadius * 1.4,
       ),
       paint,
     );
@@ -252,17 +306,17 @@ class _RoulettePainter extends CustomPainter {
     // Draw center circle
     paint.color = const Color(0xFFD3D3D3); // Light grey/silver
     paint.style = PaintingStyle.fill;
-    canvas.drawCircle(center, innerRadius * 0.15, paint);
+    canvas.drawCircle(center, innerWoodenRadius * 0.15, paint);
 
     // Draw metallic nodes at the ends of cross
-    final nodeRadius = innerRadius * 0.12;
+    final nodeRadius = innerWoodenRadius * 0.12;
 
     // Positions for the four nodes
     List<Offset> nodePositions = [
-      Offset(center.dx + innerRadius * 0.7, center.dy), // Right
-      Offset(center.dx - innerRadius * 0.7, center.dy), // Left
-      Offset(center.dx, center.dy + innerRadius * 0.7), // Bottom
-      Offset(center.dx, center.dy - innerRadius * 0.7), // Top
+      Offset(center.dx + innerWoodenRadius * 0.7, center.dy), // Right
+      Offset(center.dx - innerWoodenRadius * 0.7, center.dy), // Left
+      Offset(center.dx, center.dy + innerWoodenRadius * 0.7), // Bottom
+      Offset(center.dx, center.dy - innerWoodenRadius * 0.7), // Top
     ];
 
     // Draw the nodes
@@ -284,13 +338,28 @@ class _RoulettePainter extends CustomPainter {
     paint.color = const Color(0xFF444444); // Dark grey
     paint.style = PaintingStyle.stroke;
     paint.strokeWidth = 2.0;
-    canvas.drawCircle(center, innerRadius, paint);
+    canvas.drawCircle(center, innerWoodenRadius, paint);
 
     // Draw the ball
     final ballRadius = radius * 0.04; // Size of the ball
-    final ballDistance = radius * (0.85 - ballOffset); // Distance from center
-    final ballX = center.dx + ballDistance * cos(ballPosition);
-    final ballY = center.dy + ballDistance * sin(ballPosition);
+    double ballDistance;
+    double ballX, ballY;
+
+    if (ballInPocket) {
+      // Calculate the pocket position - aligning with a specific number
+      final segmentIndex = (ballPosition / anglePerSegment).round() % numbers.length;
+      final pocketAngle = (segmentIndex * anglePerSegment) + (anglePerSegment / 2);
+
+      // Position the ball in the middle of the pocket
+      ballDistance = pocketRadius * 0.90; // Slightly inside the pocket circle
+      ballX = center.dx + ballDistance * cos(pocketAngle);
+      ballY = center.dy + ballDistance * sin(pocketAngle);
+    } else {
+      // Ball is still rolling on the track
+      ballDistance = ballTrackRadius - (ballOffset * radius * 0.1); // Ball track with offset
+      ballX = center.dx + ballDistance * cos(ballPosition);
+      ballY = center.dy + ballDistance * sin(ballPosition);
+    }
 
     // Ball shadow
     paint.color = Colors.black54;
@@ -321,7 +390,6 @@ class _RoulettePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _RoulettePainter oldDelegate) {
-    return oldDelegate.ballPosition != ballPosition ||
-        oldDelegate.ballOffset != ballOffset;
+    return oldDelegate.ballPosition != ballPosition || oldDelegate.ballOffset != ballOffset || oldDelegate.ballInPocket != ballInPocket;
   }
 }

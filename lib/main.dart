@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:roulette_wheel/roulette.dart';
+import 'package:roulette_wheel/roulette_table.dart';
+import 'package:roulette_wheel/roulette_wheel.dart';
 
 void main() {
   runApp(const MyApp());
@@ -78,19 +79,7 @@ class _MyHomePageState extends State<MyHomePage> {
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
     return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(child: Padding(
-        padding: const EdgeInsets.only(top: 100),
-        child: Roulette(),
-      )), // This trailing comma makes auto-formatting nicer for build methods.
+      body: SafeArea(child: RouletteTable()), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
 }
