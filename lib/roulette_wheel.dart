@@ -4,18 +4,20 @@ import 'dart:math';
 import 'package:roulette_wheel/const.dart';
 
 class RouletteWheel extends StatefulWidget {
-  const RouletteWheel({super.key});
+  final Function(int) onRoundEnd;
+
+  const RouletteWheel({super.key, required this.onRoundEnd});
 
   @override
-  State<RouletteWheel> createState() => _RouletteWheelState();
+  State<RouletteWheel> createState() => RouletteWheelState();
 }
 
-class _RouletteWheelState extends State<RouletteWheel> with SingleTickerProviderStateMixin {
+class RouletteWheelState extends State<RouletteWheel> with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late Animation<double> _animation;
   late Animation<double> _ballAnimation;
 
-  late double rouletteSize = MediaQuery.of(context).size.height * 0.8;
+  late double rouletteSize = MediaQuery.of(context).size.height * 0.9;
 
   final Random _random = Random();
   double _currentAngle = 0;
@@ -38,7 +40,7 @@ class _RouletteWheelState extends State<RouletteWheel> with SingleTickerProvider
     _ballPosition = _random.nextDouble() * 2 * pi;
   }
 
-  void _spin() {
+  void spin() {
     final rotations = 5 + _random.nextInt(3);
     _targetAngle = _currentAngle + (2 * pi * rotations);
 
@@ -106,7 +108,7 @@ class _RouletteWheelState extends State<RouletteWheel> with SingleTickerProvider
           _ballInPocket = true;
           _ballOffset = 0; // No more bouncing
         });
-
+        widget.onRoundEnd(int.parse(americanRoulette[selectedSegment]));
         print("Winner: ${americanRoulette[selectedSegment]}");
       });
 
@@ -115,25 +117,21 @@ class _RouletteWheelState extends State<RouletteWheel> with SingleTickerProvider
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        AnimatedBuilder(
-          animation: _controller,
-          builder: (context, child) {
-            return Transform.rotate(
-              angle: _animation.value,
-              child: CustomPaint(
-                size: Size(rouletteSize, rouletteSize),
-                painter: _RoulettePainter(
-                  ballPosition: _ballAnimation.value,
-                  ballOffset: _ballOffset * (1 - _controller.value), // Reducing bounce over time
-                  ballInPocket: _ballInPocket,
-                ),
-              ),
-            );
-          },
-        ),
-      ],
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Transform.rotate(
+          angle: _animation.value,
+          child: CustomPaint(
+            size: Size(rouletteSize, rouletteSize),
+            painter: _RoulettePainter(
+              ballPosition: _ballAnimation.value,
+              ballOffset: _ballOffset * (1 - _controller.value), // Reducing bounce over time
+              ballInPocket: _ballInPocket,
+            ),
+          ),
+        );
+      },
     );
   }
 }
